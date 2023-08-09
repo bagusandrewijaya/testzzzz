@@ -1,10 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:location/location.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:simpegsites/getdevices.dart';
 import 'package:dio/dio.dart';
+import 'clock/cloclview.dart';
+import 'clockpainter.dart';
+import 'encrypted/textterencrypt.dart';
+import 'imageview.dart';
 import 'layout.dart';
 import 'package:qr_flutter/qr_flutter.dart' as qr;
 
@@ -15,26 +21,76 @@ class MenuQrDart extends StatefulWidget {
 
 class _MenuQrDartState extends State<MenuQrDart> {
   String? _lat, longt = '';
-  var hasilArray = [];
-  double _latitude = 0;
-  double _longitude = 0;
+  var hasilArray = '';
+  bool statusperizinan = false;
+  var TmphasilArray = [];
+  String _latitude = '0';
+  String _longitude = '0';
   String rangze = '0';
-  String? lat, lon;
-  String? res;
+  String? lat, lon, distancez, nama, ruang, nokar;
   int status = 0;
 
+  Timer? qrCodeTimer;
+  int countdown = 60; // Menit countdown
+  void getnama() async {
+    final prefs = await SharedPreferences.getInstance();
+    nama = prefs.getString('Nama');
+    ruang = prefs.getString('Ruang');
+  }
+
+  DateTime? lastQrCodeTimestamp; // Timestamp QR code terakhir dihasilkan
+  void getrange() async {
+    final url = "http://simrs.onthewifi.com:9192/konfigurasi";
+    final dio = Dio();
+    try {
+      final response = await dio.get(url);
+      final responseData = response.data;
+      print(responseData);
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _latitude = responseData['data'][0]['LAT'];
+          _longitude = responseData['data'][0]['LON'];
+          distancez = responseData['data'][0]['TOLERANSI'];
+          generateQrCode();
+        });
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
   void getData() async {
-    final response = await http.post(
-      Uri.parse("http://api.rsummi.co.id:1842/Production/sdm/cekconfigurasi"),
-      headers: {
-        'Access-Control-Allow-Origin': '*', // Tambahkan header ini
-        'Content-Type': 'application/json', // Contoh header lainnya
-      },
-    );
-    print(jsonDecode(response.body));
-    setState(() {
-      res = jsonDecode(response.body);
-    });
+    final prefs = await SharedPreferences.getInstance();
+
+    nokar = prefs.getString('Nokar');
+    final url =
+        'http://simrs.onthewifi.com:9192/sdm/getkaryawan'; // URL yang sesuai
+    final dio = Dio();
+
+    try {
+      final response = await dio.post(
+        url,
+        data: {"nokar": nokar},
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+
+        if (responseData['metadata']['code'] == 200) {
+          // Data ditemukan
+          final data = responseData['data'];
+          print('Data respons: $data');
+        } else if (responseData['metadata']['code'] == 404) {
+          // Data tidak ditemukan
+          print('Data tidak ada');
+        }
+      } else {
+        print('Gagal mengirim data. Kode status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Terjadi kesalahan: $e');
+    }
   }
 
   Future<LocationData?> getCurrentLocation() async {
@@ -54,6 +110,7 @@ class _MenuQrDartState extends State<MenuQrDart> {
     permission = await location.hasPermission();
     if (permission == PermissionStatus.denied) {
       permission = await location.requestPermission();
+
       if (permission != PermissionStatus.granted) {
         return null;
       }
@@ -71,63 +128,95 @@ class _MenuQrDartState extends State<MenuQrDart> {
     return 12742 * asin(sqrt(a)) * 1000;
   }
 
-  void checklocation() async {
+  bool mock = false;
+
+  void generateQrCode() async {
+    var idx = getId();
     var position = await getCurrentLocation();
-    double distance = calculateDistance(double.parse(lat!), double.parse(lon!),
-        position!.latitude, position.longitude);
-    bool? mock = position!.isMock;
+    setState(() {
+      mock = position!.isMock!;
+    });
     if (mock == true) {
       setState(() {
         status = 3;
+        hasilArray = "kosong";
       });
     } else {
-      if (distance <= double.parse(rangze)) {
+      double distance = calculateDistance(double.parse(_latitude),
+          double.parse(_longitude), position!.latitude, position.longitude);
+      if (distance <= double.parse(distancez!)) {
         setState(() {
           status = 1;
-          _latitude = position.latitude!;
-          _longitude = position.latitude!;
+          _lat = position!.latitude.toString();
+          longt = position.longitude.toString();
+          TmphasilArray = [
+            {
+              'latitudeX': _lat,
+              'longitudeX': longt,
+              'deviceInfo': idx,
+              'nokar': nokar,
+              'timestamp': DateTime.now().toString(),
+            }
+          ];
+          hasilArray = encryp(TmphasilArray.toString());
         });
       } else {
         setState(() {
           status = 2;
+          hasilArray = "jauh";
         });
       }
     }
 
-    print(position.latitude);
-    print(position.longitude);
-    print(status);
-    print("lat anda $lat");
-    print("lon anda $lon");
+    lastQrCodeTimestamp =
+        DateTime.now(); // Catat timestamp QR code terakhir dihasilkan
   }
 
-  void checkloc() async {
-    var idx = await getId();
-    var position = await getCurrentLocation();
-
-    setState(() {
-      _lat = position!.latitude.toString();
-      longt = position!.longitude.toString();
-      hasilArray = [
-        {
-          'latitude': _lat,
-          'longitude': longt,
-          'deviceInfo': idx,
-          'nokar': "asdadad"
-        }
-      ];
+  void startQrCodeTimer() {
+    qrCodeTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+      generateQrCode(); // Panggil fungsi generateQrCode setiap 1 menit
+      setState(() {
+        countdown =
+            60; // Reset countdown ke 60 detik setelah menghasilkan QR code
+      });
     });
+  }
 
-    print('Longitude: ${position!.longitude}');
+  void updateCountdown() {
+    if (lastQrCodeTimestamp != null) {
+      var now = DateTime.now();
+      var difference = now.difference(lastQrCodeTimestamp!);
+      setState(() {
+        countdown = (60 - difference.inSeconds)
+            .clamp(0, 60); // Hitung countdown yang tersisa
+      });
+    }
+  }
 
-    var hasilJson = jsonEncode(hasilArray);
-    print(hasilJson);
+  void startCountdownTimer() {
+    Timer.periodic(Duration(seconds: 1), (timer) {
+      if (countdown > 0) {
+        setState(() {
+          countdown--; // Kurangi countdown setiap detik
+        });
+      } else {
+        // Jika countdown habis, generate QR code
+        generateQrCode();
+        setState(() {
+          countdown = 60; // Reset countdown ke 60 detik
+        });
+      }
+    });
   }
 
   @override
   void initState() {
-    checkloc();
+    getnama();
+
     getData();
+    getrange();
+    startQrCodeTimer(); // Memulai timer QR code
+    startCountdownTimer(); // Memulai timer countdown
     super.initState();
   }
 
@@ -135,57 +224,230 @@ class _MenuQrDartState extends State<MenuQrDart> {
   Widget build(BuildContext context) {
     SizeConfig().init(context);
     return Scaffold(
-      backgroundColor: Color(0xff203268),
+      backgroundColor: Color(0xffE9EEFF),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              Container(
+                margin: EdgeInsets.only(top: 10),
+                height: 40,
+                width: 160,
+                decoration: BoxDecoration(
+                    image: DecorationImage(image: AssetImage('rsummmi4.png'))),
+              ),
               SizedBox(height: 20), // Spasi atas
-              Center(
-                child: Column(
+              Container(
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8)),
+                padding: EdgeInsets.all(8),
+                margin: EdgeInsets.only(left: 16, right: 16, top: 16),
+                child: Column(children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        margin: EdgeInsets.only(right: 16),
+                        height: 80,
+                        width: 80,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(40),
+                          border: Border.all(
+                            color: Color(0xff203268),
+                            width: 2,
+                          ),
+                        ),
+                        child: ClipRRect(
+                            borderRadius: BorderRadius.circular(40),
+                            child: Image.network(
+                                'http://simrs.onthewifi.com:9192/image/$nokar.png')),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          Text(
+                            nama == null ? "mohon tunggu..." : "$nama",
+                            style: TextStyle(
+                                fontSize: 24, color: Color(0xff203268)),
+                          ),
+                          SizedBox(
+                            height: 16,
+                          ),
+                          Text(
+                            ruang == null ? "mohon tunggu..." : "$ruang",
+                            style: TextStyle(
+                                fontSize: 16, color: Color(0xff203268)),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                ]),
+              ),
+              Container(
+                margin: EdgeInsets.only(left: 16, right: 16),
+                decoration: BoxDecoration(
+                  color: Color.fromARGB(255, 255, 255, 255),
+                ),
+                child: Row(
                   children: [
-                    Container(
-                      height: 100,
-                      width: 100,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.red,
-                      ),
-                      child: CircleAvatar(
-                        backgroundImage: NetworkImage(
-                            'https://cdn.icon-icons.com/icons2/2550/PNG/512/user_circle_icon_152504.png'),
-                      ),
+                    Stack(
+                      children: [
+                        SizedBox(
+                          height: 30,
+                          width: 15,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Color(0xffE9EEFF),
+                              borderRadius: BorderRadius.only(
+                                topRight: Radius.circular(20),
+                                bottomRight: Radius.circular(20),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.only(
+                              topRight: Radius.circular(20),
+                              bottomRight: Radius.circular(20),
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 13,
+                                    offset: Offset(11, 0),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    SizedBox(height: SizeConfig.blockSizeVertical! * 2),
-                    Text(
-                      "Bagus Andre Wijaya",
-                      style: TextStyle(color: Colors.white),
+                    Expanded(child: LayoutBuilder(
+                      builder: (BuildContext, BoxConstraints) {
+                        return Flex(
+                            direction: Axis.horizontal,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: List.generate(
+                                25,
+                                (index) => SizedBox(
+                                      width: 7,
+                                      height: 2,
+                                      child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                              color: Color(0xffC6C6C6))),
+                                    )));
+                      },
+                    )),
+                    Stack(
+                      children: [
+                        SizedBox(
+                          height: 30,
+                          width: 15,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Color(0xffE9EEFF),
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(20),
+                                bottomLeft: Radius.circular(20),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(20),
+                              bottomLeft: Radius.circular(20),
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 13,
+                                    offset: Offset(-11, 0),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     )
                   ],
                 ),
-              ),
-              SizedBox(
-                  height: SizeConfig.blockSizeVertical! *
-                      20), // Spasi antara kontainer
-              Center(
-                child: Container(
-                  decoration: BoxDecoration(color: Colors.white),
-                  child: qr.QrImage(
-                    data: '$hasilArray',
-                    version: qr.QrVersions.auto,
-                    size: 450,
-                  ),
-                ),
-              ),
-
-              Center(
+              ), // Spasi atas
+              Container(
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8)),
+                padding: EdgeInsets.all(8),
+                margin: EdgeInsets.only(left: 16, right: 16),
                 child: Column(children: [
-                  Text("lat : $res"),
-                  Text("lat : $longt"),
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          "Scan Me",
+                          style: TextStyle(color: Colors.white, fontSize: 24),
+                        ),
+                        Container(
+                          decoration: BoxDecoration(color: Colors.white),
+                          child: status == 0
+                              ? Container(
+                                  child: Text("Lokasi Belum Diizinkan"),
+                                )
+                              : status == 2
+                                  ? Container(
+                                      child: Text("Lokasi Terlalu Jauh"),
+                                    )
+                                  : status == 3
+                                      ? Container(
+                                          child:
+                                              Text("Lokasi palsu Teredeteksi"),
+                                        )
+                                      : qr.QrImage(
+                                          data: '$hasilArray',
+                                          version: qr.QrVersions.auto,
+                                          size: 450,
+                                        ),
+                        ),
+                        SizedBox(
+                            height: 10), // Spasi antara QR code dan countdown
+                        Text(
+                          "QR Code akan diperbarui dalam:",
+                          style: TextStyle(
+                              color: Color(0xfff203268), fontSize: 18),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          "$countdown",
+                          style: TextStyle(
+                              color: Color(0xfff203268),
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold),
+                        )
+                      ],
+                    ),
+                  )
                 ]),
+              ),
+              Container(
+                height: 100,
+                width: 250,
+                decoration: BoxDecoration(
+                    image: DecorationImage(
+                        fit: BoxFit.cover,
+                        image: AssetImage("Google_Play-Badge.png"))),
               )
-              // Add more containers here if needed
             ],
           ),
         ),
