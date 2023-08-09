@@ -10,7 +10,6 @@ import 'package:dio/dio.dart';
 import 'clock/cloclview.dart';
 import 'clockpainter.dart';
 import 'encrypted/textterencrypt.dart';
-import 'imageview.dart';
 import 'layout.dart';
 import 'package:qr_flutter/qr_flutter.dart' as qr;
 
