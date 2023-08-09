@@ -4,10 +4,10 @@ Future<String?> getId() async {
   var deviceInfo = DeviceInfoPlugin();
 
   try {
-    WebBrowserInfo? webBrowserInfo = await deviceInfo.webBrowserInfo;
+    IosDeviceInfo? informasiPerangkat = await deviceInfo.iosInfo;
 
-    if (webBrowserInfo != null) {
-      String userAgent = webBrowserInfo.userAgent ?? '';
+    if (informasiPerangkat != null) {
+      String userAgent = informasiPerangkat.identifierForVendor ?? '';
       return userAgent;
     } else {
       return null; // Jika informasi tidak tersedia

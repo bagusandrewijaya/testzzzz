@@ -42,8 +42,11 @@ class _MenuQrDartState extends State<MenuQrDart> {
     final url = "http://simrs.onthewifi.com:9192/konfigurasi";
     final dio = Dio();
     try {
-      final response = await dio.get(url);
-      final responseData = response.data;
+      final response = await http.get(
+        Uri.http(url),
+      );
+
+      final responseData = jsonDecode(response.body);
       print(responseData);
 
       if (response.statusCode == 200) {
@@ -63,18 +66,18 @@ class _MenuQrDartState extends State<MenuQrDart> {
     final prefs = await SharedPreferences.getInstance();
 
     nokar = prefs.getString('Nokar');
-    final url =
-        'http://simrs.onthewifi.com:9192/sdm/getkaryawan'; // URL yang sesuai
-    final dio = Dio();
+    final url = 'simrs.onthewifi.com:9192/sdm/getkaryawan'; // URL yang sesuai
 
     try {
-      final response = await dio.post(
-        url,
-        data: {"nokar": nokar},
+      final response = await http.post(
+        Uri.http(url),
+        body: {
+          'nokar': nokar,
+        },
       );
 
       if (response.statusCode == 200) {
-        final responseData = response.data;
+        final responseData = jsonDecode(response.body);
 
         if (responseData['metadata']['code'] == 200) {
           // Data ditemukan

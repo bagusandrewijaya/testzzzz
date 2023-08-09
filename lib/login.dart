@@ -24,12 +24,12 @@ class _LoginPagesState extends State<LoginPages> {
   bool _obscureText = true;
 
   String apiUrl =
-      'http://simrs.onthewifi.com:9192/sdm/getkaryawan'; // Ganti dengan URL API yang sesuai
+      'simrs.onthewifi.com:9192/sdm/getkaryawan'; // Ganti dengan URL API yang sesuai
 
   void loginUser() async {
     try {
       final response = await http.post(
-        Uri.parse(apiUrl),
+        Uri.http(apiUrl),
         body: {
           'nokar': nikController.text,
         },
